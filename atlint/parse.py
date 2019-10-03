@@ -1,24 +1,5 @@
-#!/usr/bin/env python3
-# A program to lint autotools projects
-
-import argparse
-import os
 import re
 import string
-
-PROGRAM_NAME = "atlint"
-
-
-def warn_file(filename, message):
-    print(f"{filename}: {message}")
-
-
-def warn_general(message):
-    print(f"{PROGRAM_NAME}: {message}")
-
-
-def warn_position(filename, line, column, message):
-    print(f"{filename}:{line}:{column}: {message}")
 
 
 class Macro:
@@ -183,65 +164,3 @@ def parse_macro_args(macro, line_buffer, origin):
         raise NotImplementedError("TODO: Handle unfinished macro call args")
 
     macro._clean_args()
-
-
-def trailing_whitespace(macros, ctx):
-    for macro in macros:
-        for i, arg in enumerate(macro.args, start=1):
-            if arg.rstrip() != arg:
-                line, col = macro.position
-                msg = f"Argument {i} has trailing whitespace. Trailing whitespace is preserved in M4."
-                warn_position(ctx["configure_file"], line, col, msg)
-
-
-def unquoted_args(macros, ctx):
-    quoted_arg_re = re.compile(r"\[.*\]", flags=re.MULTILINE)
-    for macro in macros:
-        for i, arg in enumerate(macro.args, start=1):
-            # `rstrip` so that more macros with trailing whitespace but
-            # incorrect quoting are warned about
-            if not quoted_arg_re.match(arg.rstrip()):
-                line, col = macro.position
-                msg = f"Argument {i} is unquoted. Consider quoting to prevent errors."
-                warn_position(ctx["configure_file"], line, col, msg)
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser("atlint", description="Autotools project linter")
-    parser.add_argument("test", nargs="?")
-    args = parser.parse_args(argv)
-
-    # Project-wide checks (for file existence)
-    # 'configure.ac' is a required file
-    if os.path.exists("configure.ac"):
-        configure_file = "configure.ac"
-    elif os.path.exists("configure.in"):
-        configure_file = "configure.in"
-        warn_general(
-            "Files named 'configure.in' are deprecated. Consider renaming to 'configure.ac'"
-        )
-    else:
-        warn_general("Cannot find 'configure.ac' or 'configure.in'")
-        # TODO: Use proper exit code
-        return 1
-
-    # configure.ac checks
-    macro_calls = parse_configure_file(configure_file)
-    context = {"configure_file": configure_file}
-    # Second element of tuple is a list of regexes for the macro name
-    macro_checkers = [(trailing_whitespace, [".*"]), (unquoted_args, [".*"])]
-    for checker, name_regexes in macro_checkers:
-        applicable_macros_re = re.compile("|".join(name_regexes))
-        matching_macros = [
-            macro for macro in macro_calls if applicable_macros_re.match(macro.name)
-        ]
-        checker(matching_macros, context)
-
-    # Makefile.am checks
-    # configure.ac + Makefile.am checks (cross-file knowledge)
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.exit(main(sys.argv))
