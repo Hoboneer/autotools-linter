@@ -33,10 +33,12 @@ class Macro:
         # The first char of a file is at (1, 1)--according to vim at least
         self.position = (line_index + 1, column_index + 1)
         self.raw_args = []
+        # Whitespace cleaned up
+        self.args = []
 
     def __repr__(self):
-        if self.raw_args:
-            suffix = f"({','.join(self.raw_args)})"
+        if self.args:
+            suffix = f"({','.join(self.args)})"
         else:
             suffix = ""
         return f"<Macro {self.name}{suffix} at {self.position}>"
@@ -53,8 +55,9 @@ def parse_configure_file(filename):
     valid_macro_calls = [
         macro for macro in macro_calls if VALID_MACRO_PREFIXES.match(macro.name)
     ]
+    # Remove leading whitespace for each arg
     for macro in valid_macro_calls:
-        print(macro)
+        macro.args = [raw_arg.lstrip() for raw_arg in macro.raw_args]
 
 
 def parse_macro_call(line_buffer, origin):
