@@ -36,6 +36,11 @@ class Macro:
         # Whitespace cleaned up
         self.args = []
 
+    def _clean_args(self):
+        # Strip leading whitespace of all args
+        for raw_arg in self.raw_args:
+            self.args.append(raw_arg.lstrip())
+
     def __repr__(self):
         if self.args:
             suffix = f"({','.join(self.args)})"
@@ -55,9 +60,6 @@ def parse_configure_file(filename):
     valid_macro_calls = [
         macro for macro in macro_calls if VALID_MACRO_PREFIXES.match(macro.name)
     ]
-    # Remove leading whitespace for each arg
-    for macro in valid_macro_calls:
-        macro.args = [raw_arg.lstrip() for raw_arg in macro.raw_args]
     return valid_macro_calls
 
 
@@ -179,6 +181,8 @@ def parse_macro_args(macro, line_buffer, origin):
 
     if paren_stack:
         raise NotImplementedError("TODO: Handle unfinished macro call args")
+
+    macro._clean_args()
 
 
 def main(argv=None):
