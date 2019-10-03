@@ -26,8 +26,12 @@ class Macro:
     #         self.name = name
     #         self.is_toplevel = toplevel
     #         self.args = args or []
-    def __init__(self, name):
+    def __init__(self, name, position):
         self.name = name
+        # Line and column (Zero-indexed for now, TODO)
+        line_index, column_index = position
+        # The first char of a file is at (1, 1)--according to vim at least
+        self.position = (line_index + 1, column_index + 1)
         self.raw_args = []
 
     def __repr__(self):
@@ -35,7 +39,7 @@ class Macro:
             suffix = f"({','.join(self.raw_args)})"
         else:
             suffix = ""
-        return f"<Macro {self.name}{suffix}>"
+        return f"<Macro {self.name}{suffix} at {self.position}>"
 
 
 def parse_configure_file(filename):
@@ -54,11 +58,11 @@ def parse_configure_file(filename):
 
 
 def parse_macro_call(line_buffer, origin):
-
     VALID_MACRO_CHARS = set(string.ascii_uppercase)
     VALID_MACRO_CHARS.add("_")
 
     macros = []
+    macro_call_start_pos = None
     macro_name_buffer = []
     for line_no, line in enumerate(line_buffer):
         # Ignore line comments
@@ -66,10 +70,17 @@ def parse_macro_call(line_buffer, origin):
             continue
         for col_no, char in enumerate(line):
             if char in VALID_MACRO_CHARS:
+                # The first character of the macro is its origin
+                if not macro_name_buffer:
+                    macro_call_start_pos = (origin[0] + line_no, origin[1] + col_no)
                 macro_name_buffer.append(char)
             elif char in "(":
                 # Now, parse the arguments.
-                macro = Macro("".join(macro_name_buffer))
+                assert macro_call_start_pos is not None
+                macro = Macro("".join(macro_name_buffer), macro_call_start_pos)
+
+                # Reset for next macro.
+                macro_call_start_pos = None
                 macro_name_buffer.clear()
 
                 position = (origin[0] + line_no, origin[1] + col_no)
@@ -84,9 +95,14 @@ def parse_macro_call(line_buffer, origin):
             elif macro_name_buffer:
                 if char not in string.ascii_lowercase:
                     # Empty macro call
-                    macro = Macro("".join(macro_name_buffer))
-                    macros.append(macro)
+                    assert macro_call_start_pos is not None
+                    macro = Macro("".join(macro_name_buffer), macro_call_start_pos)
+
+                    # Reset for next macro.
+                    macro_call_start_pos = None
                     macro_name_buffer.clear()
+
+                    macros.append(macro)
                     break
                 else:
                     # Not a macro call
