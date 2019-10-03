@@ -3,6 +3,8 @@
 
 import argparse
 import os
+import re
+import string
 
 PROGRAM_NAME = "atlint"
 
@@ -41,16 +43,17 @@ def parse_configure_file(filename):
         file_buffer = f.readlines()
 
     macro_calls = parse_macro_call(file_buffer, (0, 0))
-    import re
-    VALID_MACRO_PREFIXES = re.compile('^(AC_|AS_|AM_|_)')
+
+    VALID_MACRO_PREFIXES = re.compile("^(AC_|AS_|AM_|_)")
     # Remove "invalid" macros
-    valid_macro_calls = [macro for macro in macro_calls if VALID_MACRO_PREFIXES.match(macro.name)]
+    valid_macro_calls = [
+        macro for macro in macro_calls if VALID_MACRO_PREFIXES.match(macro.name)
+    ]
     for macro in valid_macro_calls:
         print(macro)
 
 
 def parse_macro_call(line_buffer, origin):
-    import string
 
     VALID_MACRO_CHARS = set(string.ascii_uppercase)
     VALID_MACRO_CHARS.add("_")
@@ -74,7 +77,7 @@ def parse_macro_call(line_buffer, origin):
                 # sub_line_buffer = line_buffer[position[0]][position[1]+1:]
                 sub_line_buffer = list(line_buffer[position[0]][position[1] + 1 :])
                 # Rest of the lines
-                sub_line_buffer.extend(line_buffer[position[0] + 1:])
+                sub_line_buffer.extend(line_buffer[position[0] + 1 :])
                 parse_macro_args(macro, sub_line_buffer, position)
                 macros.append(macro)
             # NOT a valid macro name char and NOT a valid M4 identifier
