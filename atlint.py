@@ -36,9 +36,17 @@ class Macro:
         # Whitespace cleaned up
         self.args = []
 
+    # Remove leading whitespace from each arg and give each a position in the file
+    def _clean_args(self, positions):
+        assert len(positions) == len(self.raw_args)
+        for (line_index, col_index), raw_arg in zip(positions, self.raw_args):
+            # The first char of a file is at (1, 1)--according to vim at least
+            pos = (line_index + 1, col_index + 1)
+            self.args.append((pos, raw_arg.lstrip()))
+
     def __repr__(self):
         if self.args:
-            suffix = f"({','.join(self.args)})"
+            suffix = f"({','.join(arg for _, arg in self.args)})"
         else:
             suffix = ""
         return f"<Macro {self.name}{suffix} at {self.position}>"
@@ -55,9 +63,6 @@ def parse_configure_file(filename):
     valid_macro_calls = [
         macro for macro in macro_calls if VALID_MACRO_PREFIXES.match(macro.name)
     ]
-    # Remove leading whitespace for each arg
-    for macro in valid_macro_calls:
-        macro.args = [raw_arg.lstrip() for raw_arg in macro.raw_args]
     return valid_macro_calls
 
 
@@ -128,11 +133,18 @@ def parse_macro_args(macro, line_buffer, origin):
 
     no_more_args = False
     quote_level = 0
+
+    arg_positions = []
     for line_no, line in enumerate(line_buffer):
         # Exit if no more arguments
         if no_more_args:
             break
         for col_no, char in enumerate(line):
+            # First non-whitespace character encountered.
+            # Commas are handled specially later on
+            if char not in string.whitespace + ',' and set(arg_chars_buffer) <= set(string.whitespace):
+                arg_positions.append((origin[0] + line_no, origin[1] + col_no))
+
             if char == "[":
                 quote_level += 1
                 arg_chars_buffer.append(char)
@@ -163,6 +175,9 @@ def parse_macro_args(macro, line_buffer, origin):
                     raise NotImplementedError("TODO: Handle unmatched parens")
                 # Macro call finished
                 if len(paren_stack) == 0:
+                    # Whitespace-only final argument
+                    if set(arg_chars_buffer) <= set(string.whitespace):
+                        arg_positions.append((origin[0] + line_no, origin[1] + col_no))
                     macro.raw_args.append("".join(arg_chars_buffer))
                     no_more_args = True
                     break
@@ -172,6 +187,10 @@ def parse_macro_args(macro, line_buffer, origin):
 
             # Next argument if comma is not protected by quote or inside inner parens
             elif quote_level == 0 and len(paren_stack) == 1 and char == ",":
+                # Whitespace-only non-final argument
+                if set(arg_chars_buffer) <= set(string.whitespace):
+                    arg_positions.append((origin[0] + line_no, origin[1] + col_no))
+
                 macro.raw_args.append("".join(arg_chars_buffer))
                 arg_chars_buffer.clear()
             else:
@@ -180,6 +199,7 @@ def parse_macro_args(macro, line_buffer, origin):
     if paren_stack:
         raise NotImplementedError("TODO: Handle unfinished macro call args")
 
+    macro._clean_args(arg_positions)
 
 def main(argv=None):
     parser = argparse.ArgumentParser("atlint", description="Autotools project linter")
