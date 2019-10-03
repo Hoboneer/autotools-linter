@@ -58,6 +58,7 @@ def parse_configure_file(filename):
     # Remove leading whitespace for each arg
     for macro in valid_macro_calls:
         macro.args = [raw_arg.lstrip() for raw_arg in macro.raw_args]
+    return valid_macro_calls
 
 
 def parse_macro_call(line_buffer, origin):
