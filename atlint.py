@@ -49,64 +49,6 @@ def parse_configure_file(filename):
         print(macro)
 
 
-#         for line_no, line in enumerate(f):
-#             for col_no, char in enumerate(line):
-#                 if char in VALID_MACRO_CHARS:
-#                     macro_name_buffer.append(char)
-#                 elif char in '(':
-#                     _parse_macro_args
-#                 else:
-#                     if
-
-# Only does the bare minimum of work to allow the caller to decide how much to parse
-# def parse_macro_call(line_buffer, origin):
-#     import string
-#
-#     VALID_MACRO_CHARS = set(string.ascii_uppercase)
-#
-#     macro_name_buffer = []
-#     arg_chars_buffer = []
-#     paren_stack = []
-#     quote_stack = []
-#
-#     CALL_MODE = 0
-#     ARGS_MODE = 1
-#     parse_mode = CALL_MODE
-#     for line_no, line in enumerate(line_buffer):
-#         for col_no, char in enumerate(line):
-#             if parse_mode == CALL_MODE:
-#                 if char in VALID_MACRO_CHARS:
-#                     macro_name_buffer.append(char)
-#                 elif char in "(":
-#                     # Now, parse the arguments.
-#                     paren_stack.append('(')
-#                     macro = Macro("".join(macro_name_buffer))
-#                     parse_mode = ARGS_MODE
-#                 # NOT a valid macro name char
-#                 elif macro_name_buffer:
-#                     # Empty macro call
-#                     macro = Macro("".join(macro_name_buffer))
-#                     break
-#                 else:
-#                     # This shouldn't have been reached
-#                     raise RuntimeError("Invalid macro call text (TODO)")
-#             elif parse_mode == ARGS_MODE:
-#                 # Next argument if comma is not protected by quote
-#                 if char == ',' and not quote_stack:
-#                     position = (origin[0] + line_no, origin[1] + col_no)
-#                     macro.raw_args.append(''.join(arg_chars_buffer))
-#                     arg_chars_buffer.clear()
-#                 # Complete macro call
-#                 elif char == ')' and len(paren_stack) == 0 and paren_stack[0] == '(':
-#                     paren_stack.append(char)
-#                     macro.raw_args.append(''.join(arg_chars_buffer))
-#                     arg_chars_buffer.clear()
-#                 elif char == '(':
-#                     paren_stack.append(char)
-#                 elif char == ')':
-#                     if not paren_stack:
-
-
 def parse_macro_call(line_buffer, origin):
     import string
 
@@ -209,9 +151,6 @@ def parse_macro_args(macro, line_buffer, origin):
 
     if paren_stack:
         raise NotImplementedError("TODO: Handle unfinished macro call args")
-
-
-# def _parse_macro_args(
 
 
 def main(argv=None):
