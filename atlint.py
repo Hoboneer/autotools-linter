@@ -129,6 +129,11 @@ def parse_macro_args(macro, line_buffer, origin):
                 # Empty stack means unbalanced parens
                 if quote_level == 0 and not paren_stack:
                     raise NotImplementedError("TODO: Handle unbalanced parens")
+                # Ignore parens inside quotes
+                elif quote_level > 0:
+                    arg_chars_buffer.append(char)
+                    continue
+
                 other_paren = paren_stack.pop()
                 # Non-matching pair
                 if other_paren != "(":
