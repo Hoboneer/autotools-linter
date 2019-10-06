@@ -30,7 +30,6 @@ def unquoted_args(macros, ctx):
                 msg = f"Argument {i} is unquoted. Consider quoting to prevent errors."
                 warn_position(ctx["configure_file"], line, col, msg)
 
-
 @_public_checker
 @checker([r'^AC_CONFIG_AUX_DIR$'])
 def bad_aux_dir(macros, ctx):
