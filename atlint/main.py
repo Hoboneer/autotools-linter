@@ -4,6 +4,7 @@
 import argparse
 import os
 import re
+import string
 
 from .parse import parse_configure_file
 from .check import warn_file, warn_position
@@ -56,6 +57,32 @@ def main(argv=None):
     #     if exact_name not in present_calls:
     #         call_text = f"{exact_name}({', '.join(args)})"
     #         warn_file(configure_file, f"Call to {call_text} should be present.")
+
+    # Check for whitespace between macro name and opening paren
+    empty_macros = {macro for macro in macro_calls if not macro.args}
+    with open(configure_file, "r") as f:
+        file_buffer = f.readlines()
+
+    for macro in empty_macros:
+        line, col = macro.position
+        line_index, col_index = line - 1, col - 1
+        # End of macro name
+        col_end_index = col_index + len(macro.name) - 1
+        expected_open_paren_index = col_end_index + 1
+        # Find first paren to the right of macro name
+        cur_line = file_buffer[line_index]
+        paren_index = cur_line.find("(", col_end_index)
+        if paren_index != -1:
+            # The line up to (excluding) the paren is only whitespace
+            if set(cur_line[expected_open_paren_index:paren_index]) <= set(
+                string.whitespace
+            ):
+                warn_position(
+                    configure_file,
+                    line,
+                    col,
+                    f"Whitespace before opening parenthesis for a macro call produces undesired behaviour. Use {macro.name}(args...) instead.",
+                )
 
     # Makefile.am checks
     # configure.ac + Makefile.am checks (cross-file knowledge)
