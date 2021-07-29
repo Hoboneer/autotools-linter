@@ -202,13 +202,16 @@ def check_macros(macros, unfound_but_required):
         checker(macro)
 def check_non_toplevel_macros(macros, unfound_but_required):
     """Parse and check non-toplevel macros found in the arg lists macros in `macros`, recursively."""
+    new_macros = []
     for macro in macros:
         for arg, pos in macro.iter_args():
             new_macros = parse_macros(unquote(arg), start_pos=pos)
             if not new_macros:
                 continue
+            new_macros.extend(new_macros)
             check_macros(new_macros, unfound_but_required)
             check_non_toplevel_macros(new_macros, unfound_but_required)
+    return new_macros
 
 
 def main(argv=None):
@@ -238,10 +241,32 @@ def main(argv=None):
         unfound_but_required.add("AM_INIT_AUTOMAKE")
     try:
         check_macros(toplevel_macros, unfound_but_required)
-        check_non_toplevel_macros(toplevel_macros, unfound_but_required)
+        non_toplevel_macros = check_non_toplevel_macros(toplevel_macros, unfound_but_required)
     except SystemExit as e:
         print(f"{CONFIGURE}:{e}")
         return 1
+    # Check for whitespace between macro and opening paren.
+    configure_lines = configure.split('\n')
+    for macro in toplevel_macros + non_toplevel_macros:
+        if macro.args:
+            continue
+        row, col = macro.pos
+        # Start from where the open paren should be.
+        try:
+            chars = configure_lines[row-1][col+len(macro.name)-1:]
+        except IndexError:
+            continue
+        for i, char in enumerate(chars):
+            if char in WHITESPACE:
+                continue
+            elif char == "(":
+                # A working macro call (albeit empty), e.g., AC_FOO()
+                if i == 0:
+                    break
+                do_warn(macro.pos, f"whitespace between macro name and opening parenthesis for '{macro.name}'")
+            else:
+                # Not a macro call.
+                break
     if unfound_but_required:
         do_warn(None, f"missing required macros: {', '.join(sorted(name for name in unfound_but_required))}")
 
