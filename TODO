@@ -1,0 +1,6 @@
+- Support auto-fixing for quoting, required macros, etc.
+- Warn on obsolete macros based on user-defined platforms/standards.
+- Support warning categories: style, etc.
+- Check automake.
+- Recognise comments, and allow granular (and non-granular) disabling of atlint.
+- Add pypi support.  So, need to store project metadata in multiple places?

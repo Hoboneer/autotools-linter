@@ -10,11 +10,6 @@ import re
 
 from functools import wraps
 
-# TODO: Support auto-fixing for quoting, required macros, etc.
-# TODO: Warn on obsolete macros based on user-defined platforms/standards.
-# TODO: Support warning categories: style, etc.
-# TODO: Check automake
-# TODO: Recognise comments, and allow granular (and non-granular) disabling of atlint.
 
 class Macro:
     def __init__(self, name, pos):
