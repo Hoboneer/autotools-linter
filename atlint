@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+import sys
+
+if sys.version_info < (3, 6):
+    print("atlint: at least version python 3.6 is required", file=sys.stderr)
+    exit(1)
+
+import string
+import re
+
+from functools import wraps
+
+# TODO: Support auto-fixing for quoting, required macros, etc.
+# TODO: Warn on obsolete macros based on user-defined platforms/standards.
+# TODO: Support warning categories: style, etc.
+# TODO: Check automake
+# TODO: Recognise comments, and allow granular (and non-granular) disabling of atlint.
+
+class Macro:
+    def __init__(self, name, pos):
+        self.name = name
+        self.pos = pos
+        # Raw text of each arg (to be parsed as needed).
+        # Init with single empty string for easier parsing.
+        self.args = ['']
+        self.arg_positions = []
+
+    def iter_args(self):
+        return zip(self.args, self.arg_positions)
+
+    def __str__(self):
+        return f"{self.name}({', '.join(repr(arg) for arg in self.args)})"
+
+
+MACRO_PREFIXES = ('m4_', 'AC_', 'AM_', 'AS_')
+# m4 macros can't start with digits, but I don't want to get too complicated yet.
+ALLOWED_MACRO_CHARS = set(string.ascii_letters) | {'_'} | set(string.digits)
+WHITESPACE = set(string.whitespace)
+
+def parse_macros(text, start_pos=(1, 1)):
+    curr_macro_name = ''
+    macros = []
+    do_macro_args = False
+    # Handle dnl comments.
+    skip_line = False
+    # NOTE: Assumes quote char is '['
+    unbalanced_quotes = 0
+
+    row, col = start_pos
+    for char in text:
+        if char == '\n':
+            skip_line = False
+            # Handle no-arg (potential) macros just before a newline.
+            if not do_macro_args:
+                if curr_macro_name:
+                    if curr_macro_name.startswith(MACRO_PREFIXES):
+                        macros.append(Macro(curr_macro_name, (row, col-len(curr_macro_name))))
+                    curr_macro_name = ''
+            col = 1
+            row += 1
+            # Macro args swallow newlines.
+            if not do_macro_args:
+                # Handle no-args macro at end of file.
+                continue
+        else:
+            col += 1
+        if skip_line:
+            continue
+
+        if do_macro_args:
+            macro = macros[-1]
+            if char == '[':
+                unbalanced_quotes += 1
+                if set(macro.args[-1]) < WHITESPACE:
+                    macro.arg_positions.append((row, col))
+                macro.args[-1] += char
+            elif char == ']':
+                unbalanced_quotes -= 1
+                macro.args[-1] += char
+            elif unbalanced_quotes == 0:
+                if char == ')':
+                    do_macro_args = False
+                    # Give the arg of an arg list with a single whitespace-only arg the position of the opening paren.
+                    # E.g., position of the arg of `AC_FOO( )' is right *after* the last "O" in the name.
+                    if len(macro.arg_positions) != len(macro.args):
+                        macro.arg_positions.append((macro.pos[0], macro.pos[1] + len(macro.name)))
+                elif char == ',':
+                    # Give empty args the position of its comma delimiter.
+                    if len(macro.arg_positions) != len(macro.args):
+                        macro.arg_positions.append((row, col))
+                    macro.args.append('')
+                else:
+                    # First non-whitespace char of each arg is its position.
+                    if char not in WHITESPACE and set(macro.args[-1]) < WHITESPACE:
+                        macro.arg_positions.append((row, col-1))
+                    macro.args[-1] += char
+            else:
+                # Just add to the text of the current arg.
+                # First non-whitespace char of each arg is its position.
+                if char not in WHITESPACE and set(macro.args[-1]) < WHITESPACE:
+                    macro.arg_positions.append((row, col-1))
+                macro.args[-1] += char
+        elif char in ALLOWED_MACRO_CHARS:
+            curr_macro_name += char
+        elif curr_macro_name:
+            # The macro name ends.
+            if curr_macro_name == "dnl":
+                skip_line = True
+            elif not curr_macro_name.startswith(MACRO_PREFIXES):
+                # Ignore this "macro".
+                pass
+            elif char == '(':
+                macros.append(Macro(curr_macro_name, (row, col-len(curr_macro_name)-1)))
+                do_macro_args = True
+            else:
+                assert char not in ALLOWED_MACRO_CHARS
+                # Macro names can't go across lines.
+                # Its position should be the first character of its name.
+                macros.append(Macro(curr_macro_name, (row, col-len(curr_macro_name)-1)))
+            curr_macro_name = ''
+        # Ignore whitespace.
+
+    for macro in macros:
+        if len(macro.args) == 1 and macro.args[0] == '':
+            macro.args.clear()
+        for i, arg in enumerate(macro.args):
+            # Preserve whitespace-only args to allow warning about trailing whitespace.
+            if arg.isspace():
+                continue
+            macro.args[i] = arg.lstrip()
+        assert len(macro.args) == len(macro.arg_positions), macro
+
+    return macros
+
+# CHECKS:
+WARNINGS = []
+WARNINGS_GLOBAL = []
+def do_warn(pos, msg):
+    if pos is not None:
+        line, col = pos
+        WARNINGS.append((pos, f"{line}:{col}: {msg}"))
+    else:
+        WARNINGS_GLOBAL.append(f" {msg}")
+def unquote(arg):
+    return re.sub(r"^\[(.*)\]$", r"\1", arg)
+
+REQUIRED_MACROS = ['AC_INIT', 'AC_OUTPUT']
+REQUIRED_MACROS += ['AC_CONFIG_AUX_DIR', 'AC_CONFIG_MACRO_DIR']
+FORBIDDEN_MACROS = {'m4_changequote'}
+
+def requires_args(n):
+    def requires_wrapper(f):
+        @wraps(f)
+        def requires(macro):
+            if len(macro.args) != n:
+                plural = "s" if n != 1 else ""
+                do_warn(pos, f"macro '{macro.name}' requires exactly {n} argument{plural} but got {len(macro.args)} instead")
+                return
+            return f(macro)
+        return requires
+    return requires_wrapper
+
+@requires_args(1)
+def check_ac_config_aux_dir(macro):
+    if unquote(macro.args[0]) != "build-aux":
+        do_warn(macro.pos, f"argument for '{macro.name}' should be [build-aux]")
+@requires_args(1)
+def check_ac_config_macro_dir(macro):
+    if unquote(macro.args[0]) != "m4":
+        do_warn(macro.pos, f"argument for '{macro.name}' should be [m4]")
+
+
+CHECKS = {
+    'AC': {
+        'CONFIG': {
+            'AUX': {
+                'DIR': check_ac_config_aux_dir,
+            },
+            'MACRO': {
+                'DIR': check_ac_config_macro_dir,
+            },
+        },
+    },
+}
+def check_macros(macros, unfound_but_required):
+    """Lint `macros` for m4 issues, required and forbidden macros, and macro-specific checks."""
+    for macro in macros:
+        for i, (arg, pos) in enumerate(zip(macro.args, macro.arg_positions), start=1):
+            if arg.endswith(tuple(string.whitespace)):
+                do_warn(pos, "trailing whitespace in macro argument")
+            if arg and not arg[0].isdigit() and not arg[0].isspace() and arg[0] != '[':
+                do_warn(pos, f"unquoted macro argument which could contain macros or leading whitespace '{arg}'")
+        if macro.name in FORBIDDEN_MACROS:
+            do_warn(pos, f"use of forbidden macro '{macro.name}'... refusing to parse until removed")
+            # Refuse to lint until forbidden macros removed.
+            exit(WARNINGS[-1][1])
+        elif macro.name in unfound_but_required:
+            unfound_but_required.remove(macro.name)
+
+        name_parts = macro.name.split('_')
+        try:
+            checker = CHECKS[name_parts[0]]
+            for part in name_parts[1:]:
+                checker = checker[part]
+        except KeyError:
+            continue
+        checker(macro)
+def check_non_toplevel_macros(macros, unfound_but_required):
+    """Parse and check non-toplevel macros found in the arg lists macros in `macros`, recursively."""
+    for macro in macros:
+        for arg, pos in macro.iter_args():
+            new_macros = parse_macros(unquote(arg), start_pos=pos)
+            if not new_macros:
+                continue
+            check_macros(new_macros, unfound_but_required)
+            check_non_toplevel_macros(new_macros, unfound_but_required)
+
+
+def main(argv=None):
+    configs = ['configure.ac', 'configure.in']
+    for conf in configs:
+        try:
+            with open(conf) as f:
+                configure = f.read()
+        except OSError:
+            continue
+        else:
+            CONFIGURE = conf
+            break
+    else:
+        print("atlint: couldn't find a configure.ac or configure.in file", file=sys.stderr)
+        return 1
+    try:
+        with open("Makefile.am") as f:
+            automake = f.read()
+    except OSError:
+        automake = None
+
+    toplevel_macros = parse_macros(configure)
+
+    unfound_but_required = set(REQUIRED_MACROS)
+    if automake:
+        unfound_but_required.add("AM_INIT_AUTOMAKE")
+    try:
+        check_macros(toplevel_macros, unfound_but_required)
+        check_non_toplevel_macros(toplevel_macros, unfound_but_required)
+    except SystemExit as e:
+        print(f"{CONFIGURE}:{e}")
+        return 1
+    if unfound_but_required:
+        do_warn(None, f"missing required macros: {', '.join(sorted(name for name in unfound_but_required))}")
+
+    # Check automake
+
+    # Sort by position.
+    WARNINGS.sort(key=lambda x: x[0])
+    for _, msg in WARNINGS:
+        print(f"{CONFIGURE}:{msg}")
+    for msg in WARNINGS_GLOBAL:
+        print(f"{CONFIGURE}:{msg}")
+
+
+if __name__ == '__main__':
+    exit(main())
