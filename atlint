@@ -274,7 +274,7 @@ def main(argv=None):
 
     # Check automake.
     if automake:
-        print("atlint: automake support isn't implemented yet", file=sys.stderr)
+        print("atlint: found Makefile.am but automake support isn't implemented yet", file=sys.stderr)
 
     # Sort by position.
     WARNINGS.sort(key=lambda x: x[0])
