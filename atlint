@@ -182,7 +182,7 @@ CHECKS = {
 def check_macros(macros, unfound_but_required):
     """Lint `macros` for m4 issues, required and forbidden macros, and macro-specific checks."""
     for macro in macros:
-        for i, (arg, pos) in enumerate(zip(macro.args, macro.arg_positions), start=1):
+        for i, (arg, pos) in enumerate(macro.iter_args(), start=1):
             if arg.endswith(tuple(string.whitespace)):
                 do_warn(pos, "trailing whitespace in macro argument")
             if arg and not arg[0].isdigit() and not arg[0].isspace() and arg[0] != '[':
