@@ -5,9 +5,11 @@ if sys.version_info < (3, 6):
     print("atlint: at least version python 3.6 is required", file=sys.stderr)
     exit(1)
 
+import enum
 import string
 import re
 
+from collections import deque
 from functools import wraps
 
 
@@ -26,6 +28,18 @@ class Macro:
     def __str__(self):
         return f"{self.name}({', '.join(repr(arg) for arg in self.args)})"
 
+class DirectiveAction(enum.Enum):
+    # Ignore current or next line.
+    IGNORE_HERE = enum.auto
+    IGNORE_NEXT = enum.auto()
+    # Section disable/enable.
+    DISABLE = enum.auto()
+    ENABLE = enum.auto()
+class Directive:
+    def __init__(self, action, pos):
+        self.action = action
+        self.pos = pos
+
 
 MACRO_PREFIXES = ('m4_', 'AC_', 'AM_', 'AS_')
 # m4 macros can't start with digits, but I don't want to get too complicated yet.
@@ -34,7 +48,9 @@ WHITESPACE = set(string.whitespace)
 
 def parse_macros(text, start_pos=(1, 1)):
     curr_macro_name = ''
+    curr_directive = ''
     macros = []
+    directives = []
     do_macro_args = False
     # Handle dnl comments.
     skip_line = False
@@ -45,6 +61,16 @@ def parse_macros(text, start_pos=(1, 1)):
     for char in text:
         if char == '\n':
             skip_line = False
+            if curr_directive.lstrip().startswith("atlint:"):
+                _, dir_arg = curr_directive.split(":", 1)
+                try:
+                    action = DirectiveAction.__members__[dir_arg.lstrip().upper()]
+                except KeyError:
+                    do_warn(curr_directive_pos, f"got unknown atlint directive '{dir_arg.lstrip()}'")
+                else:
+                    directives.append(Directive(action, curr_directive_pos))
+            curr_directive_pos = None
+            curr_directive = ''
             # Handle no-arg (potential) macros just before a newline.
             if not do_macro_args:
                 if curr_macro_name:
@@ -60,6 +86,7 @@ def parse_macros(text, start_pos=(1, 1)):
         else:
             col += 1
         if skip_line:
+            curr_directive += char
             continue
 
         if do_macro_args:
@@ -100,6 +127,7 @@ def parse_macros(text, start_pos=(1, 1)):
         elif curr_macro_name:
             # The macro name ends.
             if curr_macro_name == "dnl":
+                curr_directive_pos = (row, col)
                 skip_line = True
             elif not curr_macro_name.startswith(MACRO_PREFIXES):
                 # Ignore this "macro".
@@ -127,7 +155,7 @@ def parse_macros(text, start_pos=(1, 1)):
             macro.args[i] = arg.lstrip()
         assert len(macro.args) == len(macro.arg_positions), macro
 
-    return macros
+    return (macros, directives)
 
 # CHECKS:
 WARNINGS = []
@@ -205,15 +233,16 @@ def check_macros(macros, unfound_but_required):
 def check_non_toplevel_macros(macros, unfound_but_required):
     """Parse and check non-toplevel macros found in the arg lists macros in `macros`, recursively."""
     new_macros = []
+    new_directives = []
     for macro in macros:
         for arg, pos in macro.iter_args():
-            new_macros = parse_macros(unquote(arg), start_pos=pos)
-            if not new_macros:
-                continue
-            new_macros.extend(new_macros)
-            check_macros(new_macros, unfound_but_required)
-            check_non_toplevel_macros(new_macros, unfound_but_required)
-    return new_macros
+            recurse_macros, recurse_directives = parse_macros(unquote(arg), start_pos=pos)
+            new_macros.extend(recurse_macros)
+            new_directives.extend(recurse_directives)
+    if new_macros:
+        check_macros(new_macros, unfound_but_required)
+        check_non_toplevel_macros(new_macros, unfound_but_required)
+    return (new_macros, new_directives)
 
 
 def main(argv=None):
@@ -236,14 +265,14 @@ def main(argv=None):
     except OSError:
         automake = None
 
-    toplevel_macros = parse_macros(configure)
+    toplevel_macros, toplevel_directives = parse_macros(configure)
 
     unfound_but_required = set(REQUIRED_MACROS)
     if automake:
         unfound_but_required.add("AM_INIT_AUTOMAKE")
     try:
         check_macros(toplevel_macros, unfound_but_required)
-        non_toplevel_macros = check_non_toplevel_macros(toplevel_macros, unfound_but_required)
+        non_toplevel_macros, non_toplevel_directives = check_non_toplevel_macros(toplevel_macros, unfound_but_required)
     except SystemExit as e:
         print(f"{CONFIGURE}:{e}")
         return 1
@@ -276,10 +305,47 @@ def main(argv=None):
     if automake:
         print("atlint: found Makefile.am but automake support isn't implemented yet", file=sys.stderr)
 
+    # Process directives.
+    directives = toplevel_directives + non_toplevel_directives
+    skip_here_directives = set()
+    skip_next_directives = set()
+    disable_starts = []
+    disable_ends = []
+    for directive in directives:
+        line, _ = directive.pos
+        if directive.action == DirectiveAction.IGNORE_HERE:
+            skip_here_directives.add(line)
+        elif directive.action == DirectiveAction.IGNORE_NEXT:
+            skip_next_directives.add(line)
+        elif directive.action == DirectiveAction.DISABLE:
+            disable_starts.append(line)
+        elif directive.action == DirectiveAction.ENABLE:
+            disable_ends.append(line)
+    if len(disable_starts) != len(disable_ends):
+        do_warn(None, f"unbalanced atlint disable-enable pairs (disable: {len(disable_starts)}, enable: {len(disable_ends)})... turning off section disables...")
+        disable_starts.clear()
+        disable_ends.clear()
+    disable_starts.sort()
+    disable_ends.sort()
+    disables = deque(sorted((start, end) for start, end in zip(disable_starts, disable_ends)))
+    for start, end in disables:
+        assert start < end, (start, end)
+
+    # Print warnings if not disabled (by a directive).
     # Sort by position.
     WARNINGS.sort(key=lambda x: x[0])
-    for _, msg in WARNINGS:
+    for (row, col), msg in WARNINGS:
+        if row in skip_here_directives or row-1 in skip_next_directives:
+            continue
+        if disables:
+            start, end = disables[0]
+            if start < row < end:
+                continue
+            elif row > end:
+                # Moved past disable section.
+                disables.popleft()
         print(f"{CONFIGURE}:{msg}")
+    # Global warnings shouldn't be disabled.
     for msg in WARNINGS_GLOBAL:
         print(f"{CONFIGURE}:{msg}")
 
