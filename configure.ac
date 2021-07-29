@@ -8,6 +8,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE
 
 # Checks for programs.
+dnl TODO: find a python interpreter
 
 # Checks for libraries.
 

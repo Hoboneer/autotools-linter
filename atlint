@@ -250,7 +250,9 @@ def main(argv=None):
     if unfound_but_required:
         do_warn(None, f"missing required macros: {', '.join(sorted(name for name in unfound_but_required))}")
 
-    # Check automake
+    # Check automake.
+    if automake:
+        print("atlint: automake support isn't implemented yet", file=sys.stderr)
 
     # Sort by position.
     WARNINGS.sort(key=lambda x: x[0])
