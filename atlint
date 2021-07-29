@@ -117,7 +117,9 @@ def parse_macros(text, start_pos=(1, 1)):
 
     for macro in macros:
         if len(macro.args) == 1 and macro.args[0] == '':
+            assert len(macro.arg_positions) in (0, 1), macro.arg_positions
             macro.args.clear()
+            macro.arg_positions.clear()
         for i, arg in enumerate(macro.args):
             # Preserve whitespace-only args to allow warning about trailing whitespace.
             if arg.isspace():
