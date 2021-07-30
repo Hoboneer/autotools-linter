@@ -241,7 +241,9 @@ def check_non_toplevel_macros(macros, unfound_but_required):
             new_directives.extend(recurse_directives)
     if new_macros:
         check_macros(new_macros, unfound_but_required)
-        check_non_toplevel_macros(new_macros, unfound_but_required)
+        checked_macros, checked_directives = check_non_toplevel_macros(new_macros, unfound_but_required)
+        new_macros.extend(checked_macros)
+        new_directives.extend(checked_directives)
     return (new_macros, new_directives)
 
 
